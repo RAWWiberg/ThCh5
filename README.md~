@@ -12,7 +12,7 @@ A description of the processing, mapping and analysis steps
 Detailed and annotated R code: 
 Download and analyse climatic variables for each D. montana population
 
-# 3) poolAlFreqTest.py
+# 3) poolAlFreqDiff.py
 
 Detailed and annotated python script which produces the R input file for running
 quasibinomial GLMs on each SNP.

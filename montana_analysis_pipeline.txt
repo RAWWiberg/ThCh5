@@ -1,0 +1,307 @@
+#----------------------------------------------------------------------------#
+#								  	     #
+# This is the pipeline for trimming and mapping the D. montana clinal 	     #
+# population genomic data.						     #
+#								  	     #
+# R. Axel W. Wiberg							     #
+# Last Modified: 26.05.2017						     #
+#								  	     #
+#----------------------------------------------------------------------------#
+
+######
+# 1) Run FastQC to get read quality checks
+######
+
+# To check which items failed quality checks
+$ cat *_L00*_R*_001_fastqc/summary.text | grep "FAIL" 
+
+# To see how many reads there are for each sequencing run
+$ cat *L00*_R*_001_fastqc/fastqc_data.txt | grep -e "Filename" -e "Total Sequences"
+
+
+######
+# 2) Run Trimmomatic for each sequencing run and combine the reads from each populations
+######
+# Run trimmomatic for each pair of files
+$ for f in $(ls /tmp/*_R1_* | sed 's/R1_001.fastq.gz//g'); 
+  do java -jar ${trimmomatic} PE -phred33 ${f}R1_001.fastq.gz ${f}R2_001.fastq.gz \ 
+  ${f}tqc_R1_pe.fq.gz ${f}ftqc_R1_se.fq.gz \
+  ${f}tqc_R2_pe.fq.gz ${f}ftqc_R2_se.fq.gz \
+  ILLUMINACLIP:${adapters}/TruSeq3-PE.fa:2:30:10:8:TRUE LEADING:20 TRAILING:20 SLIDINGWINDOW:5:20 MINLEN:100; 
+  done 
+[ ]
+	#-still some consistent failures: per base sequence content
+	#-seems to be at the start of reads that base content is a bit wonky.
+# or
+
+$ for f in $(ls /tmp/*_R1_* | sed 's/R1_001.fastq.gz//g'); 
+  do java -jar ${trimmomatic} PE -phred33 ${f}R1_001.fastq.gz ${f}R2_001.fastq.gz \ 
+  ${f}tqc_R1_pe.fq.gz ${f}ftqc_R1_se.fq.gz \
+  ${f}tqc_R2_pe.fq.gz ${f}ftqc_R2_se.fq.gz \
+  ILLUMINACLIP:${adapters}/TruSeq3-PE.fa:2:30:10:8:TRUE LEADING:20 TRAILING:20 SLIDINGWINDOW:5:20 MINLEN:100; 
+  done 
+[ ]
+
+
+# Concatenate the filtered reads from each sample
+$ zcat /tmp/${1}*_L002*_tqc_R1_* /tmp/${1}*_L003*_tqc_R1_* > /tmp/${1}_comb_tqc_R1_pe.fastq
+$ gzip /tmp/${1}_comb_tqc_R1_pe.fastq
+
+$ zcat /tmp/${1}*_L002*_tqc_R2_* /tmp/${1}*_L003*_tqc_R2_* > /tmp/${1}_comb_tqc_R2_pe.fastq
+$ gzip /tmp/${1}_comb_tqc_R2_pe.fastq
+
+
+######
+# 3) Run FastQC again to check how well it worked
+######
+# To unzip the fastqc output files.
+
+$ for i in $(ls *.zip); do unzip ${i}; done
+
+# To check which items failed quality checks
+$ cat *_tqc_R*_pe_fastqc/summary.txt | grep "FAIL" 
+
+$ awk '/Per base sequence quality/,/END/' *_comb_tqc_R*_pe_fastqc/fastqc_data.txt
+$ awk '/Per base sequence quality/,/END/' *_comb_tqc_R*_pe_fastqc/fastqc_data.txt
+$ awk '/Per base sequence quality/,/END/' *_comb_tqc_R*_pe_fastqc/fastqc_data.txt
+
+
+# To see how many reads there are for each sequencing run
+$ cat *_tqc_R*_pe_fastqc/fastqc_data.txt | grep -e "Filename" -e "Total Sequences"
+$ cat *_tqc_R1_pe_fastqc/fastqc_data.txt | grep -e "Filename" -e "Total Sequences"
+
+
+######
+# 4) Map reads from each population to the D. montana genome
+######
+# Filter out: mapq < 30, non-paired reads
+$ bwa mem
+
+
+######
+# 5) Mark and remove duplicates
+######
+
+
+######
+# 6) Re-align around indels
+######
+
+
+######
+# 7) Stats
+######
+# Get mapping stats from the merged bams
+$ for bam in $(ls *srt.bam); do echo ${bam} && samtools flagstat ${bam}; done
+
+# Make .cov files
+$ for bam in $(ls *srt.bam | sed 's/.bam//g'); do genomeCoverageBed -ibam ${bam}.bam -bga > ${bam}.cov; done
+# or
+$ for bam in $(ls *srt.bam | sed 's/.bam//g'); do genomeCoverageBed -ibam ${bam}.bam > ${bam}_covhist.cov; done
+
+
+# Get mean coverage from .cov files (i.e. not "*_covhist.cov" files)
+$ for covhist in $(ls *srt.cov); do echo "" && echo ${i} && awk 'BEGIN{FS=OFS="\t"}{dpth = dpth+$4}END{print dpth/NR}' ${covhist}; done
+
+# Get the genome wide distribution
+$ for covhist in $(ls *covhist.cov | sed 's/covhist.cov//g'); do cat ${covhist}covhist.cov | grep "^genome" > ${covhist}covhist_genome.cov; done
+
+
+# Get mean coverage on each contig from .cov files
+$ awk '{OFS=FS="\t"}{a[$1] += $4; N[$1]++}END{for (key in a){avg = a[key]/N[key]; printf "%s %f\n",key, avg;}}' 1_Oulanka_L002_srt_rmdup_srt_rdgrp_indraln_srt.cov
+or
+$ awk '{OFS=FS="\t"}{a[$1] += $4; N[$1]++}END{for (key in a){print key, a[key]/N[key];}}' ${i} > ${i}_covbycont.cov
+
+$ for covhist in $(ls *_srt.cov | sed 's/_srt.cov//g'); do awk '{OFS=FS="\t"}{a[$1] += $4; N[$1]++}END{for (key in a){print key, a[key]/N[key];}}' ${covhist}_srt.cov > ${covhist}_srt_covhist.cov; done
+
+
+# To subset a bam file to XX million reads
+XX=47000000
+cat <(samtools view -H in.bam) <(samtools view in.bam | shuf -n ${XX}) > out_subs.sam
+
+
+######
+# 8) Call SNPs and allele frequencies across all populations
+######
+
+##
+# With CRISP
+##
+$ CRISP --bams bamfiles.txt --ref .faidx --VCF montana_clines_pool_afs.vcf -p 50 \
+	--minc --mbq min-base-quality --mmq min-mapping-quality
+
+##
+# With PoolSNP (Martin Kapun)
+##
+$ PoolSNP.sh mpileup=montana_clines.mpileup output=~/data/montana/pop_genomics/SNPs/montana_clines_PoolSNP2 \
+reference=~/data/montana/genome/D_montana_genome_freeze_v1.4.fa \
+names=Oulanka,Korpilahti,Ashford,Seward,Crested_Butte,Terrace \
+min-cov=25 max-cov=5% min-count=25 min-freq=0.01 base-quality=20
+
+$ python2.7 ~/bin/PoolSNP-v1.0/scripts/PoolSnp.py --mpileup=montana_clines.mpileup --min-cov=25 \
+--max-cov=montana_clines_PoolSNP-cov-5%.txt --min-count=25 --min-freq=0.01 --miss-frac=0.01 \
+--base-quality-threshold=20 --header=montana_clines_PoolSNP/temp/header.txt  --namesPoolSNP.sh \
+mpileup=montana_clines.mpileup output=~/data/montana/pop_genomics/SNPs/montana_clines_PoolSNP \
+reference=~/data/montana/genome/D_montana_genome_freeze_v1.4.fa names=Oulanka,Korpilahti,Ashford,Seward,Crested_Butte,Terrace
+
+# I don't know what's going on with PoolSNP. I had to make some obvious changes to the script but it still produces the following python error:
+
+Traceback (most recent call last):
+  File "/storage/home/users/raww/bin/PoolSNP-v1.0/scripts/PoolSnp.py", line 167, in <module>
+    nuc = "".join([nuc[x] for x in range(len(nuc)) if ord(qualities[x])-pc>=baseqthreshold])
+IndexError: string index out of range
+
+##
+# With MPILEUP ########################
+##
+# Or; if I have subset the .bams that have too many reads...
+
+$ samtools mpileup \
+--max-depth 1000000 \
+--skip-indels \
+--min-MQ 20 \
+--min-BQ 15 \
+--fasta-ref /tmp/raww_montana_mpileup/D_montana_genome_freeze_v1.4.fa \
+Oulanka.bam \
+Korpilahti.bam \
+Ashford.bam \
+Seward.bam \
+Crested_Butte.bam \
+Terrace.bam > montana_clines.mpileup
+
+# and then mpileup2sync
+
+$ java -ea -Xmx7g -jar $mpi2sync --input montana_clines.mpileup \
+--output montana_clines.sync \
+--fastq-type sanger \
+--min-qual 25 \
+--threads 8
+
+
+######
+# 9) Run poolAlFreqDiff.py
+######
+# Get the PC1 and PC2 components from TableS1, 
+# must be in the same order as the mpileup command
+# INCLUDE ALTITUDE AS A COVARIABLE.
+
+$ awk 'BEGIN{FS=OFS=","}{print $1,$2,$3}' montana_poolpops_PC1PC2.csv > Clim_PC1_walt.tab
+$ awk 'BEGIN{FS=OFS=","}{print $1,$3,$4}' montana_poolpops_PC1PC2.csv > Clim_PC2_walt.tab
+
+# Get the latitude; include alt as a covariable
+
+
+# Run poolAlFreqDiff.py
+------
+# PC1
+------
+$ poolAlFreqTest.py -filename montana_clines.sync -datfile ../climPCA/Clim_PC1.tab -npops 6 -n 50 -mincnt 10 -minc 37 -maxc 106 -rescale neff -zeroes 1 > montana_clines_PC1_neff_qbglm_minc10_cov37-106.rin 
+[]
+$ poolAlFreqTest.py -filename montana_clines.sync -datfile ../climPCA/Clim_PC1_walt.tab -npops 6 -n 50 -mincnt 10 -minc 37 -maxc 106 -rescale neff -zeroes 1 > montana_clines_PC1_walt_neff_qbglm_minc10_cov37-106.rin 
+[]
+$ poolAlFreqTest.py -filename montana_clines.sync -datfile ../climPCA/Clim_PC1.tab -npops 6 -n 50 -mincnt 10 -minc 37 -maxc 106 -rescale nr -zeroes 1 > montana_clines_PC1_qbglm_minc10_cov37-106.rin 
+------
+# PC2
+------
+$ poolAlFreqTest.py -filename montana_clines.sync -datfile ../climPCA/Clim_PC2.tab -npops 6 -n 50 -mincnt 10 -minc 37 -maxc 106 -rescale neff -zeroes 1 > montana_clines_PC2_neff_qbglm_minc10_cov37-106.rin 
+[]
+$ poolAlFreqTest.py -filename montana_clines.sync -datfile ../climPCA/Clim_PC2.tab -npops 6 -n 50 -mincnt 10 -minc 37 -maxc 106 -rescale nr -zeroes 1 > montana_clines_PC2_qbglm_minc10_cov37-106.rin 
+[]
+------
+# Lat
+------
+$ poolAlFreqTest.py -filename montana_clines.sync -datfile ../climPCA/montana_poolpops_lat.csv-npops 6 -n 50 -mincnt 10 -minc 37 -maxc 106 -rescale neff -zeroes 1 > montana_clines_lat_neff_qbglm_minc10_cov37-106.rin 
+[]
+$ poolAlFreqTest.py -filename montana_clines.sync -datfile ../climPCA/montana_poolpops_lat.csv -npops 6 -n 50 -mincnt 10 -minc 37 -maxc 106 -rescale nr -zeroes 1 > montana_clines_lat_qbglm_minc10_cov37-106.rin 
+[]
+------
+# ALL
+------
+$ poolAlFreqTest.py -filename montana_clines.sync -datfile ../climPCA/montana_poolpops_altPC1PC2.csv -npops 6 -n 50 -mincnt 10 -minc 37 -maxc 106 -rescale neff -zeroes 1 > montana_clines_altpc1pc2_neff_qbglm_minc10_cov37-106.rin 
+[]
+$ poolAlFreqTest.py -filename montana_clines.sync -datfile ../climPCA/montana_poolpops_altPC1PC2.csv -npops 6 -n 50 -mincnt 10 -minc 37 -maxc 106 -rescale nr -zeroes 1 > montana_clines_altpc1pc2_qbglm_minc10_cov37-106.rin 
+[] 
+
+
+######
+# 10) Run BayeScEnv
+# de Villemereuil et al., 2
+######
+
+# Subset the output files to only contain the g estimats and their q-values as well as the SNP number
+$ awk '{print $1,$3,$4}' montana_clines_Aut_all_bscanin_fst.txt > montana_clines_Aut_all_bscanin_fst_sub.txt
+
+
+######
+# 11) Run BBGP
+# Topa et al., 2015
+######
+
+# Modify the .sync file as in the BBGP file "scripts/realData/preprocessRealData.sh"
+
+# Cut last columns (LEAVE ONLY THE COUNTS IN THE .sync FILE):
+# If I use the finished .sync file that I have run the QBGLMs on then the filtering is already done.
+# Use the file: "montana_clines_AutMins10000.sync"
+# Was prepared for BayeScEnv (only autosomes, only scaffolds > 10kb)
+
+# BBGP expects *strictly* biallelic sites. Filter the .sync file first with BBGP filtTriAllele.py.
+
+$ python ~/Packages/BBGP/scripts/realData/filtTriAllele.py --input montana_clines_AutMins10000.sync --output montana_clines_AutMins10000_bial.sync
+
+# Append header:
+# Instead of adding the time points here I can add the latitudes/PCs as headers.
+LocationName	Alt_m	PC1	PC2
+Oulanka	337	-1.04431310620995	0.634208720262304
+Korpilahti	133	-0.390758639409326	0.270829609212257
+Ashford	573	1.22426713462202	1.48871050374281
+Seward	35	0.379920892395654	1.51351881354738
+Crested Butte	2900	-0.936690003203364	-0.401551438285042
+Terrace	217	0.64297832715796	0.587784193077781
+
+
+PC1="-1.04431310620995", "-0.390758639409326", "1.22426713462202", "0.379920892395654", "-0.936690003203364", "0.64297832715796"
+PC2=0.634208720262304, 0.270829609212257, 1.48871050374281, 1.51351881354738, -0.401551438285042, 0.587784193077781
+Lat="66.67", "62.33", "46.75", "60.15", "38.9", "54.45"
+
+# ADD LAT:
+$ awk 'BEGIN{FS="\t";OFS="\t"; print "chro","pos","ref","66.67", "62.33", "46.75", "60.15", "38.9", "54.45"}{print $0}' montana_clines_AutMins10000_bial.sync > montana_clines_AutMins10000_bial_BBGPinput.sync
+
+# Run BBGP in R
+# BBGP scripts available from: https://github.com/handetopa/BBGP
+# See R script: montana_clinalpops_BBGP.R
+
+
+#####
+# 11) Get closes genes to top snps with closestBed
+#
+#####
+# Remove size info from scaffold names
+$ sed 's/-size[0-9]*//g' D_montana_genome_freeze_v1.4.gff > D_montana_genome_freeze_v1.4_scfrnm.gff
+
+# Get only gene entries from D. montana annotation file.
+$ awk '{FS=OFS="\t"}{if($3 == "gene") print $0}' D_montana_genome_freeze_v1.4_scfrnm.gff > D_montana_genome_freeze_v1.4_scfrnm_genes.gff
+
+# Get the closest gene to each SNP
+$ closestBed -a ../../clinal_population_genomics/results/bscanout/bscan_pc1/montana_clines_Aut_pc1_bscanin_topSNPs.tab -b D_montana_genome_freeze_v1.4_scfrnm_genes.gff -D ref -t all | awk '{FS=OFS="\t"}{print $1,$2,$3,$4,$7,$8,$12,$13}' > ../../clinal_population_genomics/results/bscanout/bscan_pc1/montana_clines_Aut_pc1_bscanin_topSNPs_closestgenes.tab
+
+# Modify the output table in gedit to get only the D. virilis gene IDs
+
+> ID=.*;_RBBH_Vir_FB_N= ---
+> ;_RBBH_Vir_FB_sym= --- \t
+> ID= --- 
+> ;Name= --- \t
+> ; ---  
+> 1\. --- 1_
+> 0\. --- 0_
+> ([0-9])\t\.\t-1$ --- \1\t.\t.\t-1
+> Dvir\\ --- 
+
+
+
+
+
+
+
+
+
+
