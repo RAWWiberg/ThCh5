@@ -1,4 +1,4 @@
-# Thesis Chapter 4
+# Thesis Chapter 5
 
 This repository contains a description of the steps that were taking in the processing of
 genomic samples and subsequent analysis. It contains the following files.
