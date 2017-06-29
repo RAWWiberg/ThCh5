@@ -296,7 +296,12 @@ $ closestBed -a ../../clinal_population_genomics/results/bscanout/bscan_pc1/mont
 > ([0-9])\t\.\t-1$ --- \1\t.\t.\t-1
 > Dvir\\ --- 
 
+####
+# 12) Get the top SNP ids for pc1 and pc2
+#
+####
 
+$ awk '{OFS=""}{print $1,"_",$2,"_",$3}' montana_clines_Aut_pc1_bscanin_topSNPs.tab > montana_clines_Aut_pc1_bscanin_topSNPs.list
 
 
 
